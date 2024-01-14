@@ -1,0 +1,156 @@
+(*Proverif for RLWE-based Privacy-Preserving  Authentication Scheme*)
+(* ProVerify relies on the symbolic Dolev-Yao model *)
+(* Run: ./proverif RLWE_mutual_authentication.pv *)
+
+(* The channels used for the communication *)
+free cak:channel[private].       (*Channel between Device and TA*)
+free cbk:channel[private].       (*Channel between Edge Server and TA*)
+free cab:channel.                (*Channel between Device and Edge Server*)
+
+(*Constants and Variables*)
+const IDA:bitstring[private].    (*ID of Device*)
+const IDB:bitstring.             (*ID of Edge Server*)
+const TIDA:bitstring.            (*Pseudo ID of Device*)
+const PWDA:bitstring[private].   (*Password of Device*)
+const a:bitstring.               (*Public paramter a*)
+
+const T1:bitstring.              (*Timestamp of DeviceA*)
+const T2:bitstring.              (*Timestamp of DeviceB*)
+
+free smA:bitstring[private].    (*sampled value s of Device*)
+free emA:bitstring[private].    (*sampled value e of Device*)
+
+free smB:bitstring[private].    (*sampled value s of Edge Server*)
+free emB:bitstring[private].    (*sampled value e of Edge Server*)
+
+free sm:bitstring[private].     (*sampled value s of TA*)
+free em:bitstring[private].     (*sampled value e of TA*)
+
+free pmA:bitstring.             (*public key p of Device*)
+free pmB:bitstring.             (*public key p of Edge Server*)
+free pm:bitstring.              (*public key p of TA*)
+
+(*Auxiliary Functions*)
+fun hash(bitstring):bitstring.
+fun append(bitstring,bitstring):bitstring.
+fun add(bitstring,bitstring):bitstring.
+fun mul(bitstring,bitstring):bitstring.
+fun xor(bitstring,bitstring):bitstring.
+fun cha(bitstring):bitstring.
+fun mod2(bitstring,bitstring):bitstring.
+fun getstring(nat): bitstring.
+
+(*Events*)
+event end_SD_Auth(bitstring,bitstring).
+event end_ES_Auth(bitstring,bitstring).
+
+event begin_SD_Auth(bitstring,bitstring).
+event begin_ES_Auth(bitstring,bitstring).
+
+event begin_ES(bitstring,bitstring,bitstring,bitstring,bitstring).
+event begin_SD(bitstring,bitstring,bitstring,bitstring,bitstring).
+
+event end_SD(bitstring). (*SD ends the protocol with ES*)
+event end_ES(bitstring). (*ES ends the protocol with SD*)
+
+
+(*Attack Model*)
+query attacker(smA).
+query attacker(smB).
+query attacker(sm).
+query attacker(emA).
+query attacker(emB).
+query attacker(em).
+query attacker(IDA).
+
+
+(*SD authenticates ES*)
+query x:bitstring, u:bitstring, v:bitstring, y:bitstring, w:bitstring, n:bitstring; inj-event(end_ES(x))==>inj-event(begin_SD(u,v,y,w,n)).
+
+(*ES authenticates SD*)
+query x:bitstring, u:bitstring, v:bitstring, y:bitstring, w:bitstring, n:bitstring; inj-event(end_SD(x))==>inj-event(begin_ES(u,v,y,w,n)).
+
+
+
+(*Process Device*)
+(* Registration of Device *)
+let Device() =
+let pmA = add(mul(a,smA), mul(getstring(2),emA)) in
+let TWDA = hash(append(TIDA,PWDA)) in
+out(cak,(IDA,TIDA,TWDA,pmA));
+
+in(cak,(DiX:bitstring,ViX:bitstring));
+event end_SD_Auth(IDA,pmA);
+
+(* Mutual Authentication and Key Agreement*)
+new Si:bitstring;
+new Ei:bitstring;
+let Pi = add(mul(a,Si), mul(getstring(2),Ei)) in
+let Ki = mul(add(Si,smA), pmB) in
+let Wi = cha(Ki) in
+let Sigmai = mod2(Ki, Wi) in
+let Alphai = hash(append(TIDA, append(Pi, append(Wi, append(Sigmai, T1))))) in 
+out(cab,(TIDA,Pi,Wi,Alphai,T1));
+
+in(cab,(IDBX:bitstring,PjX:bitstring, WjX:bitstring, AlphijX:bitstring, T2:bitstring));
+(*A believes it started the protocol with B*)
+event begin_ES(IDBX,PjX,WjX,AlphijX,T2);
+if IDBX = IDB then
+let KjXX = mul(add(PjX, pmB), smA) in
+let SigmajXX = mod2(KjXX, WjX) in
+let AlphajXX = hash(append(IDBX, append(pmB, append(WjX, append(SigmajXX,T2))))) in
+if AlphajXX = AlphijX then
+let skAB = hash(append(TIDA,append(IDB,append(pmA, append(Wi, append(Sigmai, append(pmB, append(WjX, SigmajXX)))))))) in
+event end_SD(skAB).
+
+
+
+(* Process Edge Server *)
+(* Registration of Edge Server *)
+let EServer() =
+let pmB = add(mul(a,smB), mul(getstring(2),emB)) in
+out(cbk,(IDB,pmB));
+
+in(cbk, IDBXX:bitstring);
+event end_ES_Auth(IDB, pmB);
+
+(* Mutual Authentication and Key Agreement*)
+in(cab,(IDAX:bitstring,PiX:bitstring, WiX:bitstring, AlphiiX:bitstring, T1X:bitstring));
+(*A believes it started the protocol with A*)
+event begin_SD(IDAX,PiX,WiX,AlphiiX,T1X);
+if IDAX = IDA then
+let KiXX = mul(add(PiX, pmA), smB) in
+let SigmaiXX = mod2(KiXX, WiX) in
+let AlphaiXX = hash(append(IDAX, append(pmA, append(WiX, append(SigmaiXX,T1X))))) in
+
+if AlphaiXX = AlphiiX then
+new Sj:bitstring;
+new Ej:bitstring;
+let Pj = add(mul(a,Sj), mul(getstring(2),Ej)) in
+let Kj = mul(add(Sj,smB), pmA) in
+let Wj = cha(Kj) in
+let Sigmaj = mod2(Kj, Wj) in
+let Alphaj = hash(append(IDB, append(Pj, append(Wj, append(Sigmaj, T2))))) in 
+out(cab,(IDB,Pj,Wj,Alphaj,T2));
+let skAB = hash(append(TIDA,append(IDB,append(pmA, append(WiX, append(AlphiiX, append(pmB, append(Wj, Sigmaj)))))))) in
+event end_ES(skAB).
+
+
+
+(*Process TAAuth*)
+let TAAuth() =
+in(cak,(IDAX:bitstring,PIDX:bitstring,TWDX:bitstring,PMAX:bitstring));
+if IDAX = IDA then
+let Di = xor(hash(append(PIDX, sm)), TWDX) in
+let Vi = hash(append(PIDX,append(TWDX,Di))) in
+event begin_SD_Auth(IDAX,PMAX);
+out(cak,(Di,Vi));
+
+in(cbk,(IDBX:bitstring, PMBX:bitstring));
+if IDBX = IDB then
+event begin_ES_Auth(IDBX,PMBX);
+out(cbk,IDBX).
+
+process
+    let p = add(mul(a,sm), mul(getstring(2), em)) in                              
+    (!Device())|(TAAuth())|(!EServer())
